@@ -41,6 +41,7 @@ GROUPS_IDENTIFIERS = ["G0000"]
 
 DOMAINS = ["enterprise", "mobile", "ics"]
 ATTACK_TO_STIX_MAPPING = {"groups" : ["intrusion-set"], "software" : ["malware", "tool"]}
+REQUESTS_SESSION = None
 # ----------------------
 # Util functions
 
@@ -58,24 +59,35 @@ class LayerInfo:
         for domain in domains:
             if domain not in DOMAINS:
                 raise ValueError(f"The domain {domain} has not been recognized")
+
         self.domains = domains
 
     @classmethod
     def from_stix_block(self, stix_block):
         """Construct a LayerInfo from a STIX block"""
         if stix_block.type not in [item for sub_list in ATTACK_TO_STIX_MAPPING.values() for item in sub_list]: # Stix representation of Software and Groups, flatten the list of list
-            raise TypeError("This STIX block doesn't describe a Software or a Group")
+            raise TypeError("This STIX block doesn't describe a MITRE ATTACK Software or Group")
         if not stix_block.external_references:
-            raise TypeError("This STIX block doesn't describe MITRE ATTACK data")
+            raise TypeError("This STIX block doesn't describe any MITRE ATTACK data")
         for external_reference in stix_block.external_references:
             if external_reference.source_name == "mitre-attack":
                 return LayerInfo(external_reference.external_id, [domain.strip("-attack") for domain in stix_block.x_mitre_domains])
-        raise TypeError("This STIX block doesn't describe MITRE ATTACK data")
+        raise TypeError("This STIX block doesn't describe any MITRE ATTACK data")
 
 def download(url, file_path):
-    r = requests.get(url, allow_redirects=True)
+    global REQUESTS_SESSION
+    try:
+        r = REQUESTS_SESSION.get(url, allow_redirects=True)
+    except AttributeError:
+        # Initializes the Requests session, to improve download speed, and recall download
+        REQUESTS_SESSION = requests.Session()
+        return download(url=url, file_path=file_path)
+        
     if not r.ok:
-        raise ConnectionError(f"Download failed : HTTP code {r.status_code} !")
+        if r.status_code == 404:
+            raise FileNotFoundError("This layer is not available on MITRE ATTACK website yet !")
+        else:
+            raise ConnectionError(f"Download failed : HTTP code {r.status_code} !")
 
     # Check that it is a correct JSON file, because sometimes, a HTML file is downloaded instead
     try:
@@ -88,6 +100,8 @@ def download(url, file_path):
         "wb",
     ) as output_json:
         output_json.write(r.content)
+            
+
 
 def download_info_layer(layer_info: LayerInfo, layers_path):
     is_fully_downloaded = True
@@ -266,13 +280,13 @@ except Exception as e:
     exit(1)
 # ----------------------
 
-
-stix_data = []
 print("Initializing STIX CTI Client, this could take a while ...")
 attack_cti_client = attackcti.attack_client()
 
 # Software handling
 # --------
+stix_data = []
+selected_software_domain = "all"
 if cli_arguments.software_ids is not None:
     id_list = []
     # Get the id list from the source code
@@ -297,13 +311,17 @@ else:
             stix_data = attack_cti_client.get_software()
     elif cli_arguments.all_enterprise_software:
             stix_data = attack_cti_client.get_enterprise_malware()
+            selected_software_domain = "enterprise"
     elif cli_arguments.all_mobile_software:
             stix_data = attack_cti_client.get_mobile_malware()
+            selected_software_domain = "mobile"
     elif cli_arguments.all_ics_software:
             stix_data = attack_cti_client.get_ics_malware()
+            selected_software_domain = "ics"
 
 # Groups handling
 # --------
+selected_groups_domain = "all"
 if cli_arguments.groups_ids is not None:
     id_list = []
     # Get the id list from the source code
@@ -327,10 +345,13 @@ else:
             stix_data += attack_cti_client.get_groups()
     elif cli_arguments.all_enterprise_groups:
             stix_data += attack_cti_client.get_enterprise_groups()
+            selected_groups_domain = "enterprise"
     elif cli_arguments.all_mobile_groups:
             stix_data += attack_cti_client.get_mobile_groups()
+            selected_groups_domain = "mobile"
     elif cli_arguments.all_ics_groups:
             stix_data += attack_cti_client.get_ics_groups()
+            selected_groups_domain = "ics"
 
 # --------
 # Convert each STIX block to a LayerInfo
@@ -338,8 +359,17 @@ layer_info_download_list = []
 for stix_block in stix_data:
     try:
         layer_info_download_list.append(LayerInfo.from_stix_block(stix_block))
+    except TypeError as e:
+        pass # STIX Block parsing error, it means that this is not a Software or a Group
     except Exception as e:
-        print(f"A STIX block could not be parsed : {e.args}")
+        print(f"A Software or Group could not be processed : {e.args[0]}")
+
+# Filter only the selected domains, because there are some Software or Groups that have multiple domains
+for layer_info in layer_info_download_list:
+    if selected_groups_domain != "all" and layer_info.type == "groups":
+        layer_info.domains = [selected_groups_domain]
+    if selected_software_domain != "all" and layer_info.type == "software":
+        layer_info.domains = [selected_software_domain]
 
 # Prepare successful download count
 number_of_groups_to_download = 0

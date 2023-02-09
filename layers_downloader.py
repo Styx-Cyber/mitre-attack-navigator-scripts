@@ -5,38 +5,38 @@ import requests
 import argparse
 
 ######### Edit the two arrays below
-SOFTWARE_IDENTIFIERS = ["S0123"]
-# GROUPS_IDENTIFIERS = [
-#     "G0130",
-#     "G0025",
-#     "G0009",
-#     "G0035",
-#     "G0066",
-#     "G0117",
-#     "G0084",
-#     "G0125",
-#     "G0065",
-#     "G0045",
-#     "G0104",
-#     "G0027",
-#     "G0076",
-#     "G0134",
-#     "G0090",
-#     "G0138",
-#     "G0026",
-#     "G0016",
-#     "G0060",
-#     "G0074",
-#     "G0100",
-#     "G0004",
-#     "G0095",
-#     "G0059",
-#     "G0103",
-#     "G0121",
-#     "G0089",
-#     "G0131",
-#     "G0010",]
-GROUPS_IDENTIFIERS = ["G0000"]
+SOFTWARE_IDENTIFIERS = []
+GROUPS_IDENTIFIERS = [
+    "G0130",
+    "G0025",
+    "G0009",
+    "G0035",
+    "G0066",
+    "G0117",
+    "G0084",
+    "G0125",
+    "G0065",
+    "G0045",
+    "G0104",
+    "G0027",
+    "G0076",
+    "G0134",
+    "G0090",
+    "G0138",
+    "G0026",
+    "G0016",
+    "G0060",
+    "G0074",
+    "G0100",
+    "G0004",
+    "G0095",
+    "G0059",
+    "G0103",
+    "G0121",
+    "G0089",
+    "G0131",
+    "G0010",]
+# GROUPS_IDENTIFIERS = []
 #########
 
 DOMAINS = ["enterprise", "mobile", "ics"]
@@ -73,6 +73,12 @@ class LayerInfo:
             if external_reference.source_name == "mitre-attack":
                 return LayerInfo(external_reference.external_id, [domain.strip("-attack") for domain in stix_block.x_mitre_domains])
         raise TypeError("This STIX block doesn't describe any MITRE ATTACK data")
+
+def is_stix_block_of_attack_id(stix_block, attack_id):
+    for external_reference in stix_block.external_references:
+        if external_reference.source_name == "mitre-attack" and external_reference.external_id == attack_id:
+            return True
+    return False
 
 def download(url, file_path):
     global REQUESTS_SESSION
@@ -295,16 +301,19 @@ if cli_arguments.software_ids is not None:
     else:
         id_list = cli_arguments.software_ids
 
-    for (index, id) in enumerate(id_list):
-        try:
-            search_stix_output = attack_cti_client.get_object_by_attack_id(attack_id=id, object_type=ATTACK_TO_STIX_MAPPING["software"][0])
-            search_stix_output += attack_cti_client.get_object_by_attack_id(attack_id=id, object_type=ATTACK_TO_STIX_MAPPING["software"][1])
-            if len(search_stix_output) == 0:
-                raise ValueError("This search did not give any result")
-            stix_data += search_stix_output
-        except Exception as e:
-            print(f"The Software ID {id} doesn't match any MITRE ATTACK Software data")
-        print(f"{index + 1}/{len(id_list)} Software IDs checked...")
+    if len(id_list) != 0:
+        all_software_stix_data = attack_cti_client.get_software()
+        for one_stix_block_software in all_software_stix_data:
+            for id in id_list:
+                if is_stix_block_of_attack_id(one_stix_block_software, id):
+                    stix_data += [one_stix_block_software]
+                    id_list.remove(id)
+                    break
+            if len(id_list) == 0:
+                break
+
+        if len(id_list) != 0:
+            print(f"""{", ".join(id_list)} Software IDs could not be found !""")
 
 else:
     if cli_arguments.all_software:
@@ -330,15 +339,19 @@ if cli_arguments.groups_ids is not None:
     else:
         id_list = cli_arguments.groups_ids
 
-    for (index, id) in enumerate(id_list):
-        try:
-            search_stix_output = attack_cti_client.get_object_by_attack_id(attack_id=id, object_type=ATTACK_TO_STIX_MAPPING["groups"][0])
-            if len(search_stix_output) == 0:
-                raise ValueError("This search did not give any result")
-            stix_data += search_stix_output
-        except Exception as e:
-            print(f"The Software ID {id} doesn't match any MITRE ATTACK Groups data")
-        print(f"{index + 1}/{len(id_list)} Groups IDs checked ...")
+    if len(id_list) != 0:
+        all_groups_stix_data = attack_cti_client.get_groups()
+        for one_stix_block_groups in all_groups_stix_data:
+            for id in id_list:
+                if is_stix_block_of_attack_id(one_stix_block_groups, id):
+                    stix_data += [one_stix_block_groups]
+                    id_list.remove(id)
+                    break
+            if len(id_list) == 0:
+                break
+
+        if len(id_list) != 0:
+            print(f"""{", ".join(id_list)} Groups IDs could not be found !""")
 
 else:
     if cli_arguments.all_groups:

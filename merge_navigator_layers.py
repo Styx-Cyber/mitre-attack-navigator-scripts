@@ -142,7 +142,7 @@ for technique in merged_layer.layer.techniques:
             technique.comment = technique.comment.strip()
 
 # Set layer metadata
-merged_layer.layer.description = (f"""ATT&CK Techniques used by {", ".join([get_layer_name(layer, filename) for layer, filename in layers_to_filename_dict.items()]).strip()}""")
+merged_layer.layer.description = (f"""ATT&CK Techniques used by {", ".join([get_layer_name(layer, filename) for layer, filename in layers_to_filename_dict.items()]).strip()}. Maximum score is {max_score}""")
 merged_layer.layer.name = f"{len(layers_to_filename_dict)} layers merged"
 merged_layer.layer.hideDisabled = True
 merged_layer.layer.expandSubtechniques = False
